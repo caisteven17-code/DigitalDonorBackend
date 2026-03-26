@@ -1,0 +1,13 @@
+{
+  "name": "HopeCardRN",
+  "displayName": "HopeCardRN",
+  "expo": {
+    "name": "HopeCardRN",
+    "slug": "hopecardrn",
+    "version": "1.0.0",
+    "sdkVersion": "55.0.0",
+    "assetBundlePatterns": [
+      "**/*"
+    ]
+  }
+}
