@@ -1,0 +1,16 @@
+{
+  "name": "digital-donor-backend",
+  "version": "1.0.0",
+  "description": "Microservices backend for Digital Donor",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:gateway\" \"npm run dev:users\" \"npm run dev:donations\" \"npm run dev:notifications\"",
+    "dev:gateway": "cd api-gateway && node index.js",
+    "dev:users": "cd users-service && node index.js",
+    "dev:donations": "cd donations-service && node index.js",
+    "dev:notifications": "cd notifications-service && node index.js",
+    "install:all": "cd api-gateway && npm install && cd ../users-service && npm install && cd ../donations-service && npm install && cd ../notifications-service && npm install && cd ../shared && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
