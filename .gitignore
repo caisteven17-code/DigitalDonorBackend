@@ -76,3 +76,8 @@ yarn-error.log
 
 # environments
 .env
+
+# local diagnostics
+tmp/
+backend/donations-service/columns.txt
+backend/donations-service/check_schema.js

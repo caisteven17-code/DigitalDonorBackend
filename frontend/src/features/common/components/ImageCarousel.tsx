@@ -10,8 +10,8 @@ const images = [
   { uri: 'https://picsum.photos/id/40/800/400' },
 ];
 
-export default function ImageCarousel() {
-  const scrollRef = useRef(null);
+const ImageCarousel: React.FC = () => {
+  const scrollRef = useRef<ScrollView>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
 
   useEffect(() => {
@@ -44,7 +44,7 @@ export default function ImageCarousel() {
       </ScrollView>
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   image: {
@@ -52,3 +52,5 @@ const styles = StyleSheet.create({
     height: 220,
   },
 });
+
+export default ImageCarousel;

@@ -1,7 +1,12 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 
-export default function StepTabs({ currentTab, setCurrentTab }) {
+interface StepTabsProps {
+  currentTab: number;
+  setCurrentTab: (tab: number) => void;
+}
+
+const StepTabs: React.FC<StepTabsProps> = ({ currentTab, setCurrentTab }) => {
   return (
     <View style={styles.row}>
       <TouchableOpacity style={styles.tab} onPress={() => setCurrentTab(1)}>
@@ -25,7 +30,7 @@ export default function StepTabs({ currentTab, setCurrentTab }) {
       </TouchableOpacity>
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   row: {
@@ -47,7 +52,7 @@ const styles = StyleSheet.create({
   },
   activeText: {
     color: '#B94F4F',
-    fontWeight: '700',
+    fontWeight: '700' as '700',
   },
   line: {
     marginTop: 8,
@@ -60,3 +65,5 @@ const styles = StyleSheet.create({
     backgroundColor: '#B94F4F',
   },
 });
+
+export default StepTabs;

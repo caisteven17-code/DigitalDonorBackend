@@ -1,46 +1,183 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { RootStackParamList } from '@navigation/AppNavigator';
 import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   TouchableOpacity,
   FlatList,
   Image,
   Modal,
   Dimensions,
+  Alert,
+  ActivityIndicator,
+  ImageSourcePropType,
+  Share
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { CartItem } from '@types';
+import { supabase } from '@config/supabase';
+import { API_BASE_URL, API_HEADERS, APP_SHARE_LINK } from '@config/app';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
-const paymentMethods = ['Credit Card', 'GCash', 'PayMaya', 'Bank Transfer'];
+const paymentMethods = [
+  { label: 'Credit Card', value: 'card' },
+  { label: 'GCash', value: 'gcash' },
+  { label: 'PayMaya', value: 'maya' },
+  { label: 'Bank Transfer', value: 'bank' },
+];
 
-export default function CartScreen({ navigation, route }) {
-  const { cartItems: initialCartItems = [] } = route.params || {};
-  const [cartItems, setCartItems] = useState(initialCartItems);
+type CartScreenProps = NativeStackScreenProps<RootStackParamList, 'Cart'>;
+
+export default function CartScreen({ navigation }: CartScreenProps) {
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [isPaymentModalVisible, setIsPaymentModalVisible] = useState(false);
   const [isSuccessModalVisible, setIsSuccessModalVisible] = useState(false);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const selectedPaymentLabel =
+    paymentMethods.find(method => method.value === selectedPaymentMethod)?.label || '';
+
+  const fetchCart = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/users/guest/cart`, {
+        headers: API_HEADERS,
+      });
+      const json = await response.json();
+      if (json.success) {
+        setCartItems(json.data);
+      }
+    } catch (error) {
+      console.error('Error fetching cart:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCart();
+  }, []);
 
   const subtotal = cartItems.reduce(
-    (acc, item) => acc + item.amount * item.quantity,
+    (acc, item) => acc + (Number(item.amount) || 0) * (Number(item.quantity) || 1),
     0,
   );
   const total = subtotal;
 
-  const removeItem = id => {
-    setCartItems(cartItems.filter(item => item.id !== id));
+  const handleCheckout = async () => {
+    try {
+      setIsProcessing(true);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        Alert.alert('Login required', 'Sign in first before completing a donation.');
+        return;
+      }
+
+      if (cartItems.length === 0) {
+        Alert.alert('Cart is empty', 'Add a donation card before checking out.');
+        return;
+      }
+
+      if (!selectedPaymentMethod) {
+        Alert.alert('Payment method required', 'Choose a payment method before checking out.');
+        return;
+      }
+
+      const reference = 'MOCK-' + Math.random().toString(36).substring(2, 10).toUpperCase();
+      const fulfillResponse = await fetch(`${API_BASE_URL}/donations/fulfill`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          ...API_HEADERS,
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          amount: total,
+          reference,
+          paymentMethod: selectedPaymentMethod,
+          items: cartItems,
+        })
+      });
+      const fulfillJson = await fulfillResponse.json();
+
+      if (!fulfillResponse.ok || !fulfillJson.success) {
+        throw new Error(fulfillJson.error || 'Failed to record donation in Supabase.');
+      }
+
+      const clearResponse = await fetch(`${API_BASE_URL}/users/guest/cart/clear`, {
+        method: 'POST',
+        headers: API_HEADERS,
+      });
+      const clearJson = await clearResponse.json();
+
+      if (!clearResponse.ok || !clearJson.success) {
+        throw new Error(clearJson.error || 'Donation was saved, but the cart could not be cleared.');
+      }
+
+      setIsPaymentModalVisible(false);
+      setIsSuccessModalVisible(true);
+      setCartItems([]);
+    } catch (err: any) {
+      Alert.alert('Checkout Error', err.message || 'Failed to record donation.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
-  const renderCartItem = ({ item }) => (
+  const copyToClipboard = async () => {
+    try {
+      await Clipboard.setStringAsync(APP_SHARE_LINK);
+      Alert.alert('Copied!', 'The link has been copied to your clipboard.');
+    } catch (err) {
+      Alert.alert('Copy Failed', 'Please try selecting the text manually.');
+    }
+  };
+
+  const shareDonationLink = async () => {
+    try {
+      await Share.share({
+        message: `Open Digital Donor: ${APP_SHARE_LINK}`,
+        url: APP_SHARE_LINK,
+      });
+    } catch (err) {
+      Alert.alert('Share Failed', 'Unable to open the share dialog.');
+    }
+  };
+
+  const removeItem = async (id: string) => {
+    try {
+      // PERSIST: Call backend to remove from cart
+      const response = await fetch(`${API_BASE_URL}/users/guest/cart/${id}`, {
+        method: 'DELETE',
+        headers: API_HEADERS,
+      });
+      const json = await response.json();
+      if (json.success) {
+        setCartItems(cartItems.filter(item => item.id !== id));
+      }
+    } catch (err) {
+      Alert.alert('Cart Error', 'Failed to remove item from cart.');
+    }
+  };
+
+  const renderCartItem = ({ item }: { item: CartItem }) => (
     <View style={styles.cartItem}>
-      <Image source={item.image} style={styles.itemImage} />
+      <Image source={item.image as ImageSourcePropType} style={styles.itemImage} resizeMode="cover" />
       <View style={styles.itemDetails}>
         <Text style={styles.itemTitle}>{item.title}</Text>
         <Text style={styles.itemText}>Amount: ₱{item.amount}</Text>
         <Text style={styles.itemText}>Quantity: {item.quantity}</Text>
-        <Text style={styles.itemPrice}>₱{item.amount * item.quantity}</Text>
+        <Text style={styles.itemPrice}>₱{(Number(item.amount) || 0) * (Number(item.quantity) || 1)}</Text>
       </View>
       <TouchableOpacity
         onPress={() => removeItem(item.id)}
@@ -52,7 +189,7 @@ export default function CartScreen({ navigation, route }) {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
@@ -67,14 +204,18 @@ export default function CartScreen({ navigation, route }) {
 
       <View style={styles.content}>
         <View style={styles.cartHeaderRow}>
-          <Text style={styles.cartIcon} />
+          <Text style={styles.cartIcon}>🛒</Text>
           <View>
             <Text style={styles.cartHeaderText}>Your Cart</Text>
-            <Text style={styles.itemCount}>{cartItems.length} item(s)</Text>
+            <Text style={styles.itemCount}>{cartItems.length} item(s) (Persistent)</Text>
           </View>
         </View>
 
-        {cartItems.length === 0 ? (
+        {loading ? (
+           <View style={styles.emptyContainer}>
+              <ActivityIndicator color="#8C4B4B" />
+           </View>
+        ) : cartItems.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>Your cart is empty</Text>
           </View>
@@ -106,9 +247,9 @@ export default function CartScreen({ navigation, route }) {
         <TouchableOpacity
           style={[
             styles.proceedBtn,
-            cartItems.length === 0 && { opacity: 0.6 },
+            (cartItems.length === 0 || loading) && { opacity: 0.6 },
           ]}
-          disabled={cartItems.length === 0}
+          disabled={cartItems.length === 0 || loading}
           onPress={() => setIsPaymentModalVisible(true)}
         >
           <Text style={styles.proceedBtnText}>Proceed to Payment</Text>
@@ -137,7 +278,7 @@ export default function CartScreen({ navigation, route }) {
               onPress={() => setIsDropdownOpen(!isDropdownOpen)}
             >
               <Text style={styles.dropdownText}>
-                {selectedPaymentMethod || 'Choose Payment Method'}
+                {selectedPaymentLabel || 'Choose Payment Method'}
               </Text>
               <Text style={styles.dropdownArrow}>⌄</Text>
             </TouchableOpacity>
@@ -146,14 +287,14 @@ export default function CartScreen({ navigation, route }) {
               <View style={styles.dropdownMenu}>
                 {paymentMethods.map(method => (
                   <TouchableOpacity
-                    key={method}
+                    key={method.value}
                     style={styles.dropdownItem}
                     onPress={() => {
-                      setSelectedPaymentMethod(method);
+                      setSelectedPaymentMethod(method.value);
                       setIsDropdownOpen(false);
                     }}
                   >
-                    <Text style={styles.dropdownItemText}>{method}</Text>
+                    <Text style={styles.dropdownItemText}>{method.label}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -162,15 +303,16 @@ export default function CartScreen({ navigation, route }) {
             <TouchableOpacity
               style={[
                 styles.continueBtn,
-                !selectedPaymentMethod && { opacity: 0.6 },
+                (!selectedPaymentMethod || isProcessing) && { opacity: 0.6 },
               ]}
-              disabled={!selectedPaymentMethod}
-              onPress={() => {
-                setIsPaymentModalVisible(false);
-                setIsSuccessModalVisible(true);
-              }}
+              disabled={!selectedPaymentMethod || isProcessing}
+              onPress={handleCheckout}
             >
-              <Text style={styles.continueBtnText}>Continue</Text>
+              {isProcessing ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.continueBtnText}>Complete Donation</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -206,13 +348,16 @@ export default function CartScreen({ navigation, route }) {
               <View style={styles.linkBox}>
                 <View style={styles.linkTextContainer}>
                   <Text style={styles.linkText} numberOfLines={1}>
-                    https://example.com/post-enddont
+                    {APP_SHARE_LINK}
                   </Text>
                 </View>
-                <TouchableOpacity style={styles.copyBtn}>
+                <TouchableOpacity style={styles.copyBtn} onPress={copyToClipboard}>
                   <Text style={styles.copyIcon}>📋</Text>
                 </TouchableOpacity>
               </View>
+              <TouchableOpacity style={styles.shareBtn} onPress={shareDonationLink}>
+                <Text style={styles.shareBtnText}>Share Link</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -232,8 +377,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center' },
-  logo: { color: '#fff', fontSize: 20, fontWeight: '800', marginRight: 8 },
-  headerTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  logo: { color: '#fff', fontSize: 20, fontWeight: '800' as '800', marginRight: 8 },
+  headerTitle: { color: '#fff', fontSize: 18, fontWeight: '700' as '700' },
   backIcon: { color: '#fff', fontSize: 24 },
 
   content: { flex: 1, padding: 20 },
@@ -243,7 +388,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   cartIcon: { fontSize: 24, marginRight: 12 },
-  cartHeaderText: { fontSize: 20, fontWeight: 'bold', color: '#333' },
+  cartHeaderText: { fontSize: 20, fontWeight: 'bold' as 'bold', color: '#333' },
   itemCount: { fontSize: 14, color: '#666' },
 
   emptyContainer: {
@@ -268,9 +413,9 @@ const styles = StyleSheet.create({
   },
   itemImage: { width: 60, height: 60, borderRadius: 8 },
   itemDetails: { flex: 1, marginLeft: 12 },
-  itemTitle: { fontSize: 16, fontWeight: 'bold', color: '#333' },
+  itemTitle: { fontSize: 16, fontWeight: 'bold' as 'bold', color: '#333' },
   itemText: { fontSize: 13, color: '#666' },
-  itemPrice: { fontSize: 15, fontWeight: 'bold', color: '#000', marginTop: 4 },
+  itemPrice: { fontSize: 15, fontWeight: 'bold' as 'bold', color: '#000', marginTop: 4 },
   deleteBtn: { padding: 8 },
   deleteIcon: { fontSize: 20 },
 
@@ -287,9 +432,9 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   summaryLabel: { fontSize: 16, color: '#666' },
-  summaryValue: { fontSize: 16, fontWeight: 'bold' },
-  totalLabel: { fontSize: 18, fontWeight: 'bold' },
-  totalValue: { fontSize: 18, fontWeight: 'bold' },
+  summaryValue: { fontSize: 16, fontWeight: 'bold' as 'bold' },
+  totalLabel: { fontSize: 18, fontWeight: 'bold' as 'bold' },
+  totalValue: { fontSize: 18, fontWeight: 'bold' as 'bold' },
 
   proceedBtn: {
     backgroundColor: '#D88C8C',
@@ -299,7 +444,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  proceedBtnText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  proceedBtnText: { color: '#fff', fontSize: 18, fontWeight: 'bold' as 'bold' },
 
   // Modal
   modalOverlay: {
@@ -320,7 +465,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 20,
   },
-  modalTitle: { fontSize: 20, fontWeight: 'bold' },
+  modalTitle: { fontSize: 20, fontWeight: 'bold' as 'bold' },
   closeModal: { fontSize: 20, color: '#666' },
   label: { fontSize: 14, color: '#333', marginBottom: 10, marginTop: 10 },
   amountBox: {
@@ -331,7 +476,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 20,
   },
-  amountText: { fontSize: 24, fontWeight: 'bold', color: '#8C4B4B' },
+  amountText: { fontSize: 24, fontWeight: 'bold' as 'bold', color: '#8C4B4B' },
   dropdown: {
     height: 50,
     borderWidth: 1,
@@ -365,13 +510,13 @@ const styles = StyleSheet.create({
   dropdownItemText: { fontSize: 16, color: '#333' },
   continueBtn: {
     backgroundColor: '#D88C8C',
-    height: 50,
+    height: 56,
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 24,
   },
-  continueBtnText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  continueBtnText: { color: '#fff', fontSize: 18, fontWeight: 'bold' as 'bold' },
 
   // Success Modal
   successModal: {
@@ -384,7 +529,7 @@ const styles = StyleSheet.create({
   closeSuccess: { alignSelf: 'flex-end', padding: 5 },
   successTitle: {
     fontSize: 22,
-    fontWeight: 'bold',
+    fontWeight: 'bold' as 'bold',
     color: '#5D4037',
     marginBottom: 20,
   },
@@ -397,7 +542,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 20,
   },
-  checkMark: { color: '#fff', fontSize: 40, fontWeight: 'bold' },
+  checkMark: { color: '#fff', fontSize: 40, fontWeight: 'bold' as 'bold' },
   successMessage: {
     fontSize: 16,
     textAlign: 'center',
@@ -407,7 +552,7 @@ const styles = StyleSheet.create({
   shareContainer: { width: '100%' },
   shareLabel: {
     fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: 'bold' as 'bold',
     color: '#333',
     marginBottom: 10,
   },
@@ -433,4 +578,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   copyIcon: { fontSize: 18 },
+  shareBtn: {
+    alignItems: 'center',
+    backgroundColor: '#8C4B4B',
+    borderRadius: 8,
+    marginTop: 12,
+    paddingVertical: 12,
+  },
+  shareBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' as '700' },
 });

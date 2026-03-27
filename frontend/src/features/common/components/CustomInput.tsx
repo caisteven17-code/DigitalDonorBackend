@@ -1,13 +1,21 @@
 import React, { useState } from 'react';
-import { View, TextInput, StyleSheet } from 'react-native';
+import { View, TextInput, StyleSheet, KeyboardTypeOptions } from 'react-native';
 
-export default function CustomInput({
+interface CustomInputProps {
+  value: string;
+  onChangeText: (text: string) => void;
+  placeholder: string;
+  secureTextEntry?: boolean;
+  keyboardType?: KeyboardTypeOptions;
+}
+
+const CustomInput: React.FC<CustomInputProps> = ({
   value,
   onChangeText,
   placeholder,
   secureTextEntry = false,
   keyboardType = 'default',
-}) {
+}) => {
   const [focused, setFocused] = useState(false);
 
   return (
@@ -25,7 +33,7 @@ export default function CustomInput({
       />
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
@@ -44,3 +52,5 @@ const styles = StyleSheet.create({
     color: '#000',
   },
 });
+
+export default CustomInput;
